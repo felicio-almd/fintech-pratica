@@ -12,22 +12,79 @@ spec:
     metadata:
       labels:
         app: transaction-api
+        monitoring: "true" # Label for Prometheus ServiceMonitor
     spec:
       containers:
-      - name: api
-        image: transaction-api:latest
-        imagePullPolicy: Never
-        ports:
-        - containerPort: 8080
+        - name: api
+          image: transaction-api:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+              name: http # Named port for ServiceMonitor
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-connection
+                  key: endpoint
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-connection
+                  key: port
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-connection
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-connection
+                  key: password
+            - name: DB_NAME
+              value: "fintech"
+            - name: REDIS_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: redis-connection
+                  key: endpoint
+            - name: REDIS_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: redis-connection
+                  key: port
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: transaction-api
   namespace: fintech
+  labels:
+    monitoring: "true" # Label for Prometheus ServiceMonitor
 spec:
   selector:
     app: transaction-api
   ports:
-  - port: 8080
-    targetPort: 8080
+    - name: http # Named port for ServiceMonitor
+      port: 8080
+      targetPort: http

@@ -1,0 +1,22 @@
+apiVersion: fintech.io/v1alpha1
+kind: FintechPlatform
+metadata:
+  name: fintech-production
+  namespace: default
+spec:
+  region: us-east-1
+  environment: dev
+  dbInstanceClass: db.t3.micro
+  redisNodeType: cache.t3.micro
+  eksVersion: "1.28"
+  domainName: fintech-dev.com
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rds-credentials
+  namespace: crossplane-system
+type: Opaque
+data:
+  password:

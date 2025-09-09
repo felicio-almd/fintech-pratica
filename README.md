@@ -1,6 +1,6 @@
-# Projeto Fintech: Aplicação de Microserviços com Kubernetes
+# Projeto Fintech: Aplicação de Microserviços com Kubernetes e Crossplane
 
-Este projeto é um estudo de caso prático que aborda o ciclo de vida completo de uma aplicação de microserviços, desde a codificação em Python até a implantação, orquestração e monitoramento em um ambiente Kubernetes.
+Este projeto é um estudo de caso prático que aborda o ciclo de vida completo de uma aplicação de microserviços, desde a codificação em Python até a implantação, orquestração e provisionamento de infraestrutura na nuvem.
 
 ---
 
@@ -8,167 +8,100 @@ Este projeto é um estudo de caso prático que aborda o ciclo de vida completo d
 
 A aplicação simula um sistema de **Fintech** simples, composto por dois serviços independentes:
 
-- **Transaction API**: Responsável por receber, criar e consultar transações financeiras.  
-- **Notification API**: Responsável por simular o envio de notificações (ex: email, push) relacionadas às transações.
+- **Transaction API**: Responsável por receber, criar e consultar transações financeiras.
+- **Notification Service**: Responsável por simular o envio de notificações (ex: email, push) relacionadas às transações.
 
 O objetivo principal é demonstrar as melhores práticas de **DevOps** e **engenharia de nuvem**, incluindo:
 
-- Containerização com **Docker**  
-- Orquestração com **Kubernetes**  
-- Automação com scripts  
-- Observabilidade com **Prometheus** e **Grafana**
+- Containerização com **Docker**.
+- Orquestração com **Kubernetes**.
+- Infraestrutura como Código (IaC) com **Crossplane**.
+- Automação com **Shell Scripts**.
+- Observabilidade com **Prometheus** e **Grafana**.
 
 ---
 
 ## 🏛️ Arquitetura
 
-A arquitetura é baseada em microserviços, onde cada serviço é containerizado e implantado de forma independente no Kubernetes.
-
-```
-                  ┌───────────────────────────┐
-                  │  Cluster Kubernetes (Kind) │
-                  │                            │
-Solicitação HTTP ─►│ Service (Load Balancer) ──┬─► Pod (Transaction API)
-                  │                            │ │
-                  │ Service (Load Balancer) ───┘─► Pod (Notification API)
-                  │                            │
-                  └───────────────────────────┘
-```
-
----
-
-## ✨ Funcionalidades
-
-- Dois microserviços independentes: Transaction API e Notification API construídos com **FastAPI**.  
-- **Containerização**: Cada serviço possui seu próprio `Dockerfile`.  
-- **Orquestração com Kubernetes**: Manifestos `Deployment` e `Service` para cada API, garantindo escalabilidade e resiliência.  
-- **Automação**: Scripts para build, test e cleanup.  
-- **Infraestrutura como Código (IaC)**: Gerenciamento de um bucket **S3** na AWS via **Crossplane**.  
-- **Monitoramento e Observabilidade**: Integração com a stack **kube-prometheus-stack** (Prometheus + Grafana).  
-
----
-
-## 🛠️ Tecnologias Utilizadas
-
-- **Backend**: Python 3.11, FastAPI  
-- **Containerização**: Docker  
-- **Orquestração**: Kubernetes (Kind)  
-- **Gerenciamento de Pacotes K8s**: Helm  
-- **Infraestrutura como Código**: Crossplane  
-- **Monitoramento**: Prometheus, Grafana  
-- **Linha de Comando**: kubectl, curl  
-
----
-
-## ⚙️ Pré-requisitos
-
-Antes de começar, garanta que você tenha as seguintes ferramentas instaladas:
-
-- Docker  
-- kubectl  
-- Kind  
-- Helm  
+A arquitetura do projeto está detalhada em [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
 
 ---
 
 ## 🚀 Como Executar o Projeto
 
-### 1. Criar o Cluster Kubernetes Local
-```bash
-kind create cluster --name meu-primeiro-cluster
-```
+Você pode executar este projeto de três formas, dependendo do seu objetivo.
 
-### 2. Construir e Carregar as Imagens Docker
-```bash
-./scripts/build-and-deploy.sh --build-only
-```
-Ou manualmente:
-```bash
-docker build -t transaction-api ./transaction-api
-docker build -t notification-api ./notification-api
-kind load docker-image transaction-api notification-api --name meu-primeiro-cluster
-```
+### Opção 1: Modo Docker Compose (Local, Rápido e Simples)
 
-### 3. Implantar as Aplicações no Kubernetes
-```bash
-kubectl apply -f k8s/namespaces/namespace.yaml
-kubectl apply -f k8s/apps/
-```
+Ideal para desenvolvimento e testes rápidos da **aplicação**, sem a complexidade do Kubernetes ou custos de nuvem. Orquestra os microserviços, um banco de dados e o Redis diretamente com o Docker.
 
-### 4. Verificar a Implantação
-```bash
-kubectl get pods -n fintech
-```
-Você deverá ver 2 pods para a **transaction-api** e 2 para o **notification-service**.
+- **Pré-requisitos:** `docker`, `docker-compose`
+- **Para iniciar:**
+  ```bash
+  # Dê permissão de execução ao script (apenas uma vez)
+  chmod +x ./scripts/run-local.sh
 
-### 5. Testar as APIs
-```bash
-# Em um terminal
-kubectl port-forward -n fintech svc/transaction-api 8080:8080
-
-# Em outro terminal
-kubectl port-forward -n fintech svc/notification-service 8081:8081
-```
-
-Testando com `curl`:
-```bash
-# Testar a saúde da Transaction API
-curl http://localhost:8080/health
-
-# Criar uma nova transação
-curl -X POST http://localhost:8080/transactions   -H "Content-Type: application/json"   -d '{"amount": 150.0, "user_id": "user456", "description": "Compra online"}'
-```
+  # Inicie o ambiente e execute os testes
+  ./scripts/run-local.sh
+  ```
+- **Para limpar:** Pressione `Ctrl+C` no terminal onde o script está rodando. O script se encarregará de desligar e remover os contêineres.
 
 ---
 
-## 📊 Monitoramento com Grafana
+### Opção 2: Modo Kubernetes Local (Simulação do Ambiente de Nuvem)
 
-### Instalar a Stack de Monitoramento:
-```bash
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm install monitoring prometheus-community/kube-prometheus-stack   --namespace monitoring --create-namespace   --set grafana.adminPassword=admin
-```
+Ideal para testar os **manifestos de orquestração** do Kubernetes (`Deployments`, `Services`, `HPA`, etc.) em um ambiente que simula a nuvem, mas sem custos. Usa o `kind` para criar um cluster Kubernetes local e o `Docker Compose` para rodar as dependências (Postgres, Redis).
 
-### Acessar o Grafana:
-```bash
-kubectl port-forward -n monitoring svc/monitoring-grafana 3000:80
-```
-Acesse [http://localhost:3000](http://localhost:3000)  
-Login: **admin**  
-Senha: **admin**  
+- **Pré-requisitos:** `docker`, `docker-compose`, `kind`, `kubectl`
+- **Para iniciar:**
+  ```bash
+  # Dê permissão de execução ao script (apenas uma vez)
+  chmod +x ./scripts/run-k8s-local.sh
 
-Explore dashboards como **Kubernetes / Compute Resources / Namespace (Pods)**.
+  # Inicie o ambiente e execute os testes
+  ./scripts/run-k8s-local.sh
+  ```
+- **Para limpar:**
+  ```bash
+  # Dê permissão de execução ao script (apenas uma vez)
+  chmod +x ./scripts/cleanup-k8s-local.sh
 
----
-
-## ☁️ Gerenciamento de Infraestrutura com Crossplane
-
-O **Crossplane** está configurado para gerenciar recursos na AWS.
-
-### Configurar Credenciais:
-Crie o `Secret` do Kubernetes com suas credenciais da AWS e aplique o `ProviderConfig`.
-
-### Criar um Bucket S3:
-```bash
-kubectl apply -f crossplane/s3-bucket.yaml
-```
+  # Execute o script de limpeza
+  ./scripts/cleanup-k8s-local.sh
+  ```
 
 ---
 
-## 🧹 Limpeza do Ambiente
+### Opção 3: Modo Nuvem (Deploy Completo na AWS)
 
-### Remover os recursos criados:
-```bash
-./scripts/cleanup.sh
-```
+Este é o modo de produção completo. Provisiona toda a infraestrutura real na AWS usando **Crossplane** e implanta os microserviços em um cluster **EKS** gerenciado.
 
-### Deletar o cluster Kind:
-```bash
-kind delete cluster --name meu-primeiro-cluster
-```
+- **Pré-requisitos:** `docker`, `kind`, `kubectl`, `helm`, `aws-cli`
+- **Guia de Deploy Detalhado:** Siga as instruções em [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) para a configuração completa.
+- **Comandos Resumidos:**
+  1.  **Preparar e Provisionar:** Siga os passos do guia de deploy para configurar suas credenciais da AWS e provisionar a infraestrutura com `kubectl apply`.
+      > **AVISO**: Este passo cria recursos que geram **custos** na sua conta AWS.
+  2.  **Implantar a Aplicação:**
+      ```bash
+      chmod +x ./scripts/build-and-deploy.sh
+      ./scripts/build-and-deploy.sh
+      ```
+  3.  **Testar a Aplicação:**
+      ```bash
+      chmod +x ./scripts/test.sh
+      ./scripts/test.sh
+      ```
+- **Para limpar:**
+    > **IMPORTANTE**: Use este script para garantir que todos os recursos na nuvem sejam destruídos e evitar cobranças.
+    ```bash
+    chmod +x ./scripts/cleanup.sh
+    ./scripts/cleanup.sh
+    ```
 
 ---
-<br>
-<br>
 
-Autor: **Felicio Almeida**  
+## 📚 Documentação Adicional
+
+- **Arquitetura Detalhada**: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)
+- **Documentação da API**: [`docs/API.md`](./docs/API.md)
+- **Guia de Deploy na Nuvem**: [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md)

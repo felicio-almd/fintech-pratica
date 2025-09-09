@@ -1,0 +1,107 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xfintechplatforms.fintech.io
+spec:
+  group: fintech.io
+  names:
+    kind: XFintechPlatform
+    plural: xfintechplatforms
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                # Parâmetros básicos
+                region:
+                  type: string
+                  description: AWS Region
+                  default: "us-east-1"
+                  enum: ["us-east-1", "us-west-2", "eu-west-1"]
+
+                environment:
+                  type: string
+                  description: Environment (dev, staging, prod)
+                  default: "dev"
+                  enum: ["dev", "staging", "prod"]
+
+                # Configurações de banco
+                dbInstanceClass:
+                  type: string
+                  description: RDS instance class
+                  default: "db.t3.micro"
+                  enum: ["db.t3.micro", "db.t3.small", "db.t3.medium"]
+
+                # Configurações de Redis
+                redisNodeType:
+                  type: string
+                  description: Redis node type
+                  default: "cache.t3.micro"
+                  enum: ["cache.t3.micro", "cache.t3.small", "cache.t3.medium"]
+
+                # Configurações de EKS
+                eksVersion:
+                  type: string
+                  description: EKS Kubernetes version
+                  default: "1.28"
+                  enum: ["1.27", "1.28", "1.29"]
+
+                # Configurações de domínio
+                domainName:
+                  type: string
+                  description: Domain name for the platform
+                  default: "fintech-local.com"
+
+              required:
+                - region
+                - environment
+
+            status:
+              type: object
+              properties:
+                # Status da infraestrutura
+                ready:
+                  type: boolean
+                  description: Platform ready status
+
+                # Endpoints importantes
+                endpoints:
+                  type: object
+                  properties:
+                    rds:
+                      type: string
+                      description: RDS endpoint
+                    redis:
+                      type: string
+                      description: Redis endpoint
+                    alb:
+                      type: string
+                      description: ALB DNS name
+                    eks:
+                      type: string
+                      description: EKS cluster endpoint
+
+                # IDs dos recursos criados
+                resourceIds:
+                  type: object
+                  properties:
+                    vpcId:
+                      type: string
+                    eksClusterId:
+                      type: string
+                    rdsInstanceId:
+                      type: string
+                    redisClusterId:
+                      type: string
+                    albArn:
+                      type: string
+
+  claimNames:
+    kind: FintechPlatform
+    plural: fintechplatforms

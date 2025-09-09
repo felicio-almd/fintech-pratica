@@ -1,0 +1,549 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: fintech-aws-complete
+  labels:
+    provider: aws
+    service: fintech-platform
+spec:
+  compositeTypeRef:
+    apiVersion: fintech.io/v1alpha1
+    kind: XFintechPlatform
+
+  pipeline:
+    - step: patch-and-transform
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          # =============================================================================
+          # NETWORKING
+          # =============================================================================
+
+          # VPC Principal
+          - name: vpc
+            base:
+              apiVersion: ec2.aws.crossplane.io/v1beta1
+              kind: VPC
+              spec:
+                forProvider:
+                  region: us-east-1
+                  cidrBlock: 10.0.0.0/16
+                  enableDnsHostnames: true
+                  enableDnsSupport: true
+                  tags:
+                    Name: fintech-vpc
+                    Environment: dev
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.region
+                toFieldPath: spec.forProvider.region
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.environment
+                toFieldPath: spec.forProvider.tags.Environment
+
+          # Subnets Públicas (2 AZs para ALB)
+          - name: subnet-public-1a
+            base:
+              apiVersion: ec2.aws.crossplane.io/v1beta1
+              kind: Subnet
+              spec:
+                forProvider:
+                  region: us-east-1
+                  availabilityZone: us-east-1a
+                  cidrBlock: 10.0.1.0/24
+                  vpcIdSelector:
+                    matchControllerRef: true
+                  mapPublicIpOnLaunch: true
+                  tags:
+                    Name: fintech-public-1a
+                    Type: Public
+
+          - name: subnet-public-1b
+            base:
+              apiVersion: ec2.aws.crossplane.io/v1beta1
+              kind: Subnet
+              spec:
+                forProvider:
+                  region: us-east-1
+                  availabilityZone: us-east-1b
+                  cidrBlock: 10.0.2.0/24
+                  vpcIdSelector:
+                    matchControllerRef: true
+                  mapPublicIpOnLaunch: true
+                  tags:
+                    Name: fintech-public-1b
+                    Type: Public
+
+          # Subnets Privadas (2 AZs para RDS Multi-AZ)
+          - name: subnet-private-1a
+            base:
+              apiVersion: ec2.aws.crossplane.io/v1beta1
+              kind: Subnet
+              spec:
+                forProvider:
+                  region: us-east-1
+                  availabilityZone: us-east-1a
+                  cidrBlock: 10.0.10.0/24
+                  vpcIdSelector:
+                    matchControllerRef: true
+                  tags:
+                    Name: fintech-private-1a
+                    Type: Private
+
+          - name: subnet-private-1b
+            base:
+              apiVersion: ec2.aws.crossplane.io/v1beta1
+              kind: Subnet
+              spec:
+                forProvider:
+                  region: us-east-1
+                  availabilityZone: us-east-1b
+                  cidrBlock: 10.0.11.0/24
+                  vpcIdSelector:
+                    matchControllerRef: true
+                  tags:
+                    Name: fintech-private-1b
+                    Type: Private
+
+          # Internet Gateway
+          - name: igw
+            base:
+              apiVersion: ec2.aws.crossplane.io/v1beta1
+              kind: InternetGateway
+              spec:
+                forProvider:
+                  region: us-east-1
+                  vpcIdSelector:
+                    matchControllerRef: true
+                  tags:
+                    Name: fintech-igw
+
+          # Route Table Pública
+          - name: rt-public
+            base:
+              apiVersion: ec2.aws.crossplane.io/v1beta1
+              kind: RouteTable
+              spec:
+                forProvider:
+                  region: us-east-1
+                  vpcIdSelector:
+                    matchControllerRef: true
+                  tags:
+                    Name: fintech-rt-public
+
+          # Route para Internet Gateway
+          - name: route-internet
+            base:
+              apiVersion: ec2.aws.crossplane.io/v1beta1
+              kind: Route
+              spec:
+                forProvider:
+                  region: us-east-1
+                  routeTableIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      type: public
+                  destinationCidrBlock: 0.0.0.0/0
+                  gatewayIdSelector:
+                    matchControllerRef: true
+
+          # =============================================================================
+          # SECURITY GROUPS
+          # =============================================================================
+
+          # Security Group para ALB
+          - name: sg-alb
+            base:
+              apiVersion: ec2.aws.crossplane.io/v1beta1
+              kind: SecurityGroup
+              spec:
+                forProvider:
+                  region: us-east-1
+                  vpcIdSelector:
+                    matchControllerRef: true
+                  groupDescription: "ALB Security Group"
+                  name: fintech-alb-sg
+                  ingress:
+                    - fromPort: 80
+                      toPort: 80
+                      protocol: tcp
+                      cidrBlocks:
+                        - 0.0.0.0/0
+                    - fromPort: 443
+                      toPort: 443
+                      protocol: tcp
+                      cidrBlocks:
+                        - 0.0.0.0/0
+                  egress:
+                    - fromPort: 0
+                      toPort: 65535
+                      protocol: tcp
+                      cidrBlocks:
+                        - 10.0.0.0/16
+
+          # Security Group para EKS Nodes
+          - name: sg-eks-nodes
+            base:
+              apiVersion: ec2.aws.crossplane.io/v1beta1
+              kind: SecurityGroup
+              spec:
+                forProvider:
+                  region: us-east-1
+                  vpcIdSelector:
+                    matchControllerRef: true
+                  groupDescription: "EKS Nodes Security Group"
+                  name: fintech-eks-nodes-sg
+                  ingress:
+                    - fromPort: 80
+                      toPort: 80
+                      protocol: tcp
+                      sourceSecurityGroupIdSelector:
+                        matchControllerRef: true
+                        matchLabels:
+                          type: alb
+                    - fromPort: 8080
+                      toPort: 8081
+                      protocol: tcp
+                      sourceSecurityGroupIdSelector:
+                        matchControllerRef: true
+                        matchLabels:
+                          type: alb
+
+          # Security Group para RDS
+          - name: sg-rds
+            base:
+              apiVersion: ec2.aws.crossplane.io/v1beta1
+              kind: SecurityGroup
+              spec:
+                forProvider:
+                  region: us-east-1
+                  vpcIdSelector:
+                    matchControllerRef: true
+                  groupDescription: "RDS PostgreSQL Security Group"
+                  name: fintech-rds-sg
+                  ingress:
+                    - fromPort: 5432
+                      toPort: 5432
+                      protocol: tcp
+                      cidrBlocks:
+                        - 10.0.0.0/16
+                  tags:
+                    Name: fintech-rds-sg
+                    Type: rds
+
+          # Security Group para Redis
+          - name: sg-redis
+            base:
+              apiVersion: ec2.aws.crossplane.io/v1beta1
+              kind: SecurityGroup
+              spec:
+                forProvider:
+                  region: us-east-1
+                  vpcIdSelector:
+                    matchControllerRef: true
+                  groupDescription: "Redis ElastiCache Security Group"
+                  name: fintech-redis-sg
+                  ingress:
+                    - fromPort: 6379
+                      toPort: 6379
+                      protocol: tcp
+                      cidrBlocks:
+                        - 10.0.0.0/16
+
+          # =============================================================================
+          # RDS POSTGRESQL (MULTI-AZ)
+          # =============================================================================
+
+          # RDS Subnet Group
+          - name: rds-subnet-group
+            base:
+              apiVersion: rds.aws.crossplane.io/v1alpha1
+              kind: SubnetGroup
+              spec:
+                forProvider:
+                  region: us-east-1
+                  description: "Fintech RDS Subnet Group"
+                  name: fintech-rds-subnet-group
+                  subnetIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      Type: Private
+                  tags:
+                    Name: fintech-rds-subnet-group
+
+          # RDS PostgreSQL Instance
+          - name: rds-postgres
+            base:
+              apiVersion: rds.aws.crossplane.io/v1alpha1
+              kind: RDSInstance
+              spec:
+                forProvider:
+                  region: us-east-1
+                  dbInstanceClass: db.t3.micro
+                  dbName: fintech
+                  engine: postgres
+                  engineVersion: "13.13"
+                  username: postgres
+                  passwordSecretRef:
+                    namespace: crossplane-system
+                    name: rds-credentials
+                    key: password
+                  allocatedStorage: 20
+                  storageType: gp2
+                  storageEncrypted: true
+                  multiAz: true
+                  dbSubnetGroupNameSelector:
+                    matchControllerRef: true
+                  vpcSecurityGroupIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      Type: rds
+                  skipFinalSnapshot: true
+                  backupRetentionPeriod: 7
+                  backupWindow: "03:00-04:00"
+                  maintenanceWindow: "sun:04:00-sun:05:00"
+                  tags:
+                    Name: fintech-postgres
+                    Environment: dev
+                writeConnectionSecretsToRef:
+                  namespace: fintech
+                  name: postgres-connection
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.dbInstanceClass
+                toFieldPath: spec.forProvider.dbInstanceClass
+
+          # =============================================================================
+          # ELASTICACHE REDIS
+          # =============================================================================
+
+          # Redis Subnet Group
+          - name: redis-subnet-group
+            base:
+              apiVersion: elasticache.aws.crossplane.io/v1alpha1
+              kind: SubnetGroup
+              spec:
+                forProvider:
+                  region: us-east-1
+                  name: fintech-redis-subnet-group
+                  description: "Fintech Redis Subnet Group"
+                  subnetIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      Type: Private
+
+          # Redis Cluster
+          - name: redis-cluster
+            base:
+              apiVersion: elasticache.aws.crossplane.io/v1alpha1
+              kind: ReplicationGroup
+              spec:
+                forProvider:
+                  region: us-east-1
+                  replicationGroupId: fintech-redis
+                  description: "Fintech Redis Cluster"
+                  nodeType: cache.t3.micro
+                  numCacheClusters: 2
+                  port: 6379
+                  parameterGroupName: default.redis6.x
+                  subnetGroupNameSelector:
+                    matchControllerRef: true
+                  securityGroupIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      Type: redis
+                  atRestEncryptionEnabled: true
+                  transitEncryptionEnabled: true
+                  automaticFailoverEnabled: true
+                  multiAzEnabled: true
+                writeConnectionSecretsToRef:
+                  namespace: fintech
+                  name: redis-connection
+
+          # =============================================================================
+          # EKS CLUSTER
+          # =============================================================================
+
+          # EKS Cluster IAM Role
+          - name: eks-cluster-role
+            base:
+              apiVersion: iam.aws.crossplane.io/v1beta1
+              kind: Role
+              spec:
+                forProvider:
+                  assumeRolePolicyDocument: |
+                    {
+                      "Version": "2012-10-17",
+                      "Statement": [
+                        {
+                          "Effect": "Allow",
+                          "Principal": {
+                            "Service": "eks.amazonaws.com"
+                          },
+                          "Action": "sts:AssumeRole"
+                        }
+                      ]
+                    }
+                  tags:
+                    Name: fintech-eks-cluster-role
+
+          # Attach EKS Cluster Policy
+          - name: eks-cluster-policy
+            base:
+              apiVersion: iam.aws.crossplane.io/v1beta1
+              kind: RolePolicyAttachment
+              spec:
+                forProvider:
+                  policyArn: arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+                  roleSelector:
+                    matchControllerRef: true
+
+          # EKS Cluster
+          - name: eks-cluster
+            base:
+              apiVersion: eks.aws.crossplane.io/v1beta1
+              kind: Cluster
+              spec:
+                forProvider:
+                  region: us-east-1
+                  name: fintech-eks
+                  version: "1.28"
+                  roleArnSelector:
+                    matchControllerRef: true
+                  resourcesVpcConfig:
+                    - subnetIdSelector:
+                        matchControllerRef: true
+                      securityGroupIdSelector:
+                        matchControllerRef: true
+                      endpointPrivateAccess: true
+                      endpointPublicAccess: true
+                  logging:
+                    enable:
+                      - api
+                      - audit
+                      - authenticator
+                      - controllerManager
+                      - scheduler
+                  tags:
+                    Name: fintech-eks
+                    Environment: dev
+
+          # =============================================================================
+          # APPLICATION LOAD BALANCER
+          # =============================================================================
+
+          # ALB
+          - name: application-load-balancer
+            base:
+              apiVersion: elbv2.aws.crossplane.io/v1alpha1
+              kind: LoadBalancer
+              spec:
+                forProvider:
+                  region: us-east-1
+                  name: fintech-alb
+                  scheme: internet-facing
+                  type: application
+                  subnetIdSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      Type: Public
+                  securityGroupSelector:
+                    matchControllerRef: true
+                    matchLabels:
+                      type: alb
+                  tags:
+                    Name: fintech-alb
+                    Environment: dev
+
+          # =============================================================================
+          # SECRETS MANAGER
+          # =============================================================================
+
+          # Database Credentials Secret
+          - name: db-secret
+            base:
+              apiVersion: secretsmanager.aws.crossplane.io/v1beta1
+              kind: Secret
+              spec:
+                forProvider:
+                  region: us-east-1
+                  name: fintech/database/credentials
+                  description: "Database credentials for Fintech platform"
+                  generateSecretString:
+                    secretStringTemplate: '{"username": "postgres"}'
+                    generateStringKey: "password"
+                    excludeCharacters: '"@/\'
+                    passwordLength: 32
+                  tags:
+                    Name: fintech-db-credentials
+                    Environment: dev
+
+          # Redis Auth Token Secret
+          - name: redis-secret
+            base:
+              apiVersion: secretsmanager.aws.crossplane.io/v1beta1
+              kind: Secret
+              spec:
+                forProvider:
+                  region: us-east-1
+                  name: fintech/redis/auth-token
+                  description: "Redis auth token for Fintech platform"
+                  generateSecretString:
+                    passwordLength: 32
+                    excludeCharacters: '"@/\'
+                  tags:
+                    Name: fintech-redis-auth
+                    Environment: dev
+
+          # =============================================================================
+          # ROUTE53 (DNS)
+          # =============================================================================
+
+          # Hosted Zone (assumindo que você tem um domínio)
+          - name: hosted-zone
+            base:
+              apiVersion: route53.aws.crossplane.io/v1alpha1
+              kind: HostedZone
+              spec:
+                forProvider:
+                  region: us-east-1
+                  name: fintech-local.com # Substitua pelo seu domínio
+                  comment: "Fintech Platform DNS Zone"
+                  tags:
+                    Name: fintech-hosted-zone
+                    Environment: dev
+
+          # =============================================================================
+          # CLOUDWATCH LOG GROUPS
+          # =============================================================================
+
+          # EKS Log Group
+          - name: eks-log-group
+            base:
+              apiVersion: cloudwatchlogs.aws.crossplane.io/v1alpha1
+              kind: LogGroup
+              spec:
+                forProvider:
+                  region: us-east-1
+                  name: /aws/eks/fintech-eks/cluster
+                  retentionInDays: 7
+                  tags:
+                    Name: fintech-eks-logs
+                    Environment: dev
+
+          # Application Log Group
+          - name: app-log-group
+            base:
+              apiVersion: cloudwatchlogs.aws.crossplane.io/v1alpha1
+              kind: LogGroup
+              spec:
+                forProvider:
+                  region: us-east-1
+                  name: /aws/fintech/applications
+                  retentionInDays: 30
+                  tags:
+                    Name: fintech-app-logs
+                    Environment: dev
