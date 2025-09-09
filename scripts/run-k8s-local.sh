@@ -59,14 +59,15 @@ echo "✅ Namespace e Secrets criados."
 
 echo ""
 echo "7. Fazendo deploy das aplicações no cluster Kind..."
-kubectl apply -f k8s/apps/
+kubectl apply -f k8s/apps/notification-service/
+kubectl apply -f k8s/apps/transaction-api/
 kubectl apply -f k8s/security/
 kubectl apply -f k8s/autoscaling/
 
 echo ""
-echo "8. Aguardando os pods da aplicação ficarem prontos..."
-kubectl wait --for=condition=Ready pod -l app=transaction-api -n fintech --timeout=120s
-kubectl wait --for=condition=Ready pod -l app=notification-service -n fintech --timeout=120s
+echo "8. Aguardando os deployments da aplicação ficarem prontos..."
+kubectl wait --for=condition=Available deployment/transaction-api -n fintech --timeout=120s
+kubectl wait --for=condition=Available deployment/notification-service -n fintech --timeout=120s
 echo "✅ Aplicação pronta no Kubernetes."
 
 echo ""
